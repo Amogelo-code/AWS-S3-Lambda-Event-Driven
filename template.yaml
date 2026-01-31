@@ -1,0 +1,76 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'S3 trigger invoking Lambda using CloudFormation'
+
+Parameters:
+  BucketName:
+    Type:  String
+    Description:  Globally unique S3bucket name
+
+Resources:
+
+  ##  IAM ROLE FOR LAMBDA
+  LambdaExecutionRole:
+    Type:  AWS::IAM::Role
+    Properties:
+      RoleName:  s3-lambda-execution-role
+      AssumeRolePolicyDocument:
+        Version:  '2012-10-17'
+        Statement:
+          - Effect:  Allow
+            Principal:
+              Service:  lambda.amazonaws.com
+            Action:  sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ## LAMBDA FUNCTION
+  S3TriggerLambda:
+    Type:  AWS::Lambda::Function
+    Properties:
+      FunctionName:  s3-trigger-handler
+      Runtime:  python3.10
+      Handler:  index.lambda_handler
+      Role:  !GetAtt LambdaExecutionRole.Arn
+      Timeout:  10
+      Code:
+        ZipFile:  |
+          def lambda_handler(event, context):
+                bucket = event['Records'][0]['s3']['bucket']['name']
+                key = event['Records'][0]['s3']['object']['key']
+                
+                print(f"File uploaded: {key} in bucket {bucket}")
+                
+                return{
+                    "statusCode" : 200,
+                    "Message" : "successful"
+                }
+                
+  ## S3 BUCKET WITH TRIGGER
+  TriggerBucket:
+    Type:  AWS::S3::Bucket
+    DependsOn:  LambdaInvokePermission
+    Properties:
+        BucketName:  !Ref BucketName
+        NotificationConfiguration:  
+            LambdaConfigurations:  
+                - Event:  s3:ObjectCreated:*
+                  Function:  !GetAtt S3TriggerLambda.Arn
+                  
+  ## PERMISSION FOR S3 TO INVOKE LAMBDA
+  LambdaInvokePermission:
+    Type:  AWS::Lambda::Permission 
+    Properties:
+        FunctionName:  !Ref S3TriggerLambda
+        Action:  lambda:InvokeFunction
+        Principal:  s3.amazonaws.com
+        SourceArn:  !Sub arn:aws:s3:::${BucketName}
+        
+Outputs:
+  BucketName:
+    Description: S3 Bucket Name
+    Value: !Ref TriggerBucket
+
+  LambdaFunction:
+    Description: Lambda Function Name
+    Value: !Ref S3TriggerLambda
+  
